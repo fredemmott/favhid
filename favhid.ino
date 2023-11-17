@@ -16,7 +16,7 @@ void setup() {
   wdt_disable();
   // Speed is ignored on Arduino Micro, but we need to provide one
   Serial.begin(115200);
-  digitalWrite(LED_BUILTIN, 0);
+  digitalWrite(LED_BUILTIN, 1);
 }
 
 struct MessageHeader {
