@@ -5,13 +5,15 @@
 #include "EEPROM.h"
 #include "protocol.hpp"
 
+#include <avr/wdt.h>
+
 using namespace FAVHID;
 
 #pragma pack(push, 1)
 
 void setup() {
-  // put your setup code here, to run once:
   pinMode(LED_BUILTIN, OUTPUT);
+  wdt_disable();
   // Speed is ignored on Arduino Micro, but we need to provide one
   Serial.begin(115200);
   digitalWrite(LED_BUILTIN, 0);
@@ -54,12 +56,20 @@ void HandlePushDescriptorMessage(uint16_t length, char* message) {
 
   HID().AppendDescriptor(new HIDSubDescriptor(copy, length));
   digitalWrite(LED_BUILTIN, 1);
-  SendOKResponse();
-  delay(100);
 
+  char buf[7];
+  memcpy(buf, "?\x05PUSH", 6);
+  buf[0] = static_cast<char>(MessageType::Response_OK);
+  buf[6] = static_cast<char>(length);
+  Serial.write((char*)buf, 7);
+}
+
+void ResetUSB() {
+  Serial.end();
   USBCON = (1 << FRZCLK);
   delay(100);
   USBDevice.attach();
+  Serial.begin(115200);
 }
 
 void HandleReportMessage(uint16_t length, char* message) {
@@ -92,21 +102,36 @@ void HandleReportMessage(uint16_t length, char* message) {
   }
   
   memcpy(node->report, report, reportSize);
-  if (HID().SendReport(reportID, report, reportSize) == reportSize + 1) {
+  const auto sent = HID().SendReport(reportID, report, reportSize);
+  if (sent == reportSize + 1) {
     SendOKResponse();
-  } else {
-    SendResponse(MessageType::Response_HIDWriteFailed);
+    return;
   }
+
+  struct DebugData {
+    uint16_t length;
+    uint16_t reportSize;
+    int sent;
+  };
+    
+  char buf[sizeof(ShortMessageHeader) + sizeof(DebugData)];
+  auto header = reinterpret_cast<ShortMessageHeader*>(buf);
+  header->type = MessageType::Response_HIDWriteFailed;
+  header->dataLength = sizeof(DebugData);
+  auto debug = reinterpret_cast<DebugData*>(buf + sizeof(ShortMessageHeader));
+  debug->length = length;
+  debug->reportSize = reportSize;
+  debug->sent = sent;
+  Serial.write(buf, sizeof(buf));
 }
 
 void HandleGetSerialNumberMessage() {
   char buf[sizeof(ShortMessageHeader) + SERIAL_SIZE];
-  struct Data { uint8_t v[SERIAL_SIZE]; };
-
+  
   auto header = reinterpret_cast<ShortMessageHeader*>(buf);
   header->type = MessageType::Response_OK;
   header->dataLength = SERIAL_SIZE;
-  EEPROM.get(0, *reinterpret_cast<Data*>(buf + sizeof(ShortMessageHeader)));
+  EEPROM.get(0, *reinterpret_cast<OpaqueID*>(buf + sizeof(ShortMessageHeader)));
   Serial.write(buf, sizeof(buf)); 
 }
 
@@ -115,10 +140,35 @@ void HandleSetSerialNumberMessage(uint16_t length, const char* message) {
     SendResponse(MessageType::Response_IncorrectLength);
     return;
   }
-  struct Data { uint8_t v[SERIAL_SIZE]; };
-  EEPROM.put(0, *reinterpret_cast<const Data*>(message));
+  EEPROM.put(0, *reinterpret_cast<const OpaqueID*>(message));
 
   SendOKResponse();
+}
+
+OpaqueID gVolatileConfigID {};
+
+void HandleGetVolatileConfigIDMessage() {
+  char buf[sizeof(ShortMessageHeader) + sizeof(OpaqueID)];
+  auto header = reinterpret_cast<ShortMessageHeader*>(buf);
+  header->type = MessageType::Response_OK;
+  header->dataLength = sizeof(OpaqueID);
+  memcpy(buf + sizeof(ShortMessageHeader), &gVolatileConfigID, sizeof(OpaqueID));
+  Serial.write(buf, sizeof(buf));
+}
+
+void HandleSetVolatileConfigIDMessage(uint16_t length, const char* message) {
+  if (length != sizeof(gVolatileConfigID)) {
+    SendResponse(MessageType::Response_IncorrectLength);
+  }
+  memcpy(&gVolatileConfigID, message, length);
+  SendOKResponse();
+}
+
+void HardReset() {
+  wdt_enable(WDTO_15MS);
+  while (1) {
+    __asm("nop");
+  }
 }
 
 decltype(millis()) gLastSync {};
@@ -177,6 +227,18 @@ void loop() {
       return;
     case MessageType::SetSerialNumber:
       HandleSetSerialNumberMessage(header.getLength(), message);
+      return;
+    case MessageType::ResetUSB:
+      ResetUSB();
+      return;
+    case MessageType::GetVolatileConfigID:
+      HandleGetVolatileConfigIDMessage();
+      return;
+    case MessageType::SetVolatileConfigID:
+      HandleSetVolatileConfigIDMessage(header.getLength(), message);
+      return;
+    case MessageType::HardReset:
+      HardReset();
       return;
     default:
       SendResponse(MessageType::Response_UnhandledCommand);
