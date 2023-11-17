@@ -47,13 +47,21 @@ static_assert(sizeof(OpaqueID) == SERIAL_SIZE);
 enum class MessageType : uint8_t {
   Hello = 'F',
   RESERVED_Invalid = 0,
+  // Data: raw HID descriptor
   PushDescriptor,
+  // Data: { uint8_t reportID, char[] report }
   Report,
-  SetSerialNumber,
+  // Returned data: OpaqueID
   GetSerialNumber,
+  // Data: OpaqueID
+  SetSerialNumber,
+  // Returned data: OpaqueID
   GetVolatileConfigID,
+  // Data: OpaqueID
   SetVolatileConfigID,
+  // No data
   ResetUSB,
+  // No data
   HardReset,
 
   Response_OK = 128,
