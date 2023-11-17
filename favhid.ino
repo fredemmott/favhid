@@ -5,6 +5,8 @@
 #include "EEPROM.h"
 #include "protocol.hpp"
 
+using namespace FAVHID;
+
 #pragma pack(push, 1)
 
 void setup() {
@@ -25,18 +27,15 @@ struct MessageHeader {
   }
 };
 
-struct FAVHID {
-  uint8_t id { 0 };
+struct ReportNode {
+  uint8_t id {};
+  char* report {nullptr};
+  uint16_t reportSize;
 
-  HIDSubDescriptor* descriptor { nullptr };
-
-  uint16_t reportLength { 0 };
-  char* report { nullptr };
-  
-  FAVHID* next {nullptr};
+  ReportNode* next {nullptr};
 };
 
-FAVHID* rootDevice = nullptr;
+ReportNode* gRootReport = nullptr;
 
 void SendResponse(MessageType type) {
   ShortMessageHeader header;
@@ -49,47 +48,11 @@ void SendOKResponse() {
   SendResponse(MessageType::Response_OK);
 }
 
-void HandlePlugMessage(uint16_t length, char* message) {
-  const auto header = reinterpret_cast<PlugDataHeader*>(message);
-  const auto descriptor = message + sizeof(PlugDataHeader);
-  const auto initialReport = descriptor + header->descriptorLength;
+void HandlePushDescriptorMessage(uint16_t length, char* message) {
+  char* copy = new char[length];
+  memcpy(copy, message, length);
 
-  for (auto device = rootDevice; device; device = device->next) {
-    if (device->id == header->id) {
-      if (device->descriptor->length != header->descriptorLength) {
-        SendResponse(MessageType::Response_ConflictingID);
-      }
-      if (memcmp(device->descriptor->data, descriptor, header->descriptorLength)) {
-        SendResponse(MessageType::Response_ConflictingID);
-      }
-      SendOKResponse();
-      return;
-    }
-  }
-
-  auto node = new FAVHID();
-  node->id = header->id;
-
-  char* descriptorCopy = new char[header->descriptorLength];
-  memcpy(descriptorCopy, descriptor, header->descriptorLength);
-
-  node->descriptor = new HIDSubDescriptor(descriptorCopy, header->descriptorLength);
-
-  node->reportLength = header->reportLength;
-  node->report = new char[node->reportLength];
-  memcpy(node->report, initialReport, node->reportLength);
-
-  if (rootDevice) { 
-    FAVHID* parent = rootDevice;
-    while (parent && parent->next) {
-      parent = parent->next;
-    }
-    parent->next = node;
-  } else {
-    rootDevice = node;
-  }
-  
-  HID().AppendDescriptor(node->descriptor);
+  HID().AppendDescriptor(new HIDSubDescriptor(copy, length));
   digitalWrite(LED_BUILTIN, 1);
   SendOKResponse();
   delay(100);
@@ -102,27 +65,38 @@ void HandlePlugMessage(uint16_t length, char* message) {
 void HandleReportMessage(uint16_t length, char* message) {
   const uint8_t reportID = static_cast<uint8_t>(message[0]);
   const auto report = &message[1];
-  const auto reportLength = length - 1;
+  const auto reportSize = length - 1;
+  
+  ReportNode* node { nullptr };
+  if (!gRootReport) {
+    gRootReport = new ReportNode();
+    node = gRootReport;
+  } else {
+    node = gRootReport;
+    while (node->id != reportID && node->next) {
+      node = node->next;
+    }
+    if (node->id != reportID) {
+      node->next = new ReportNode();
+      node = node->next;
+    }
+  }
 
-  for (auto device = rootDevice; device; device = device->next) {
-    if (device->id != reportID) {
-      continue;
-    }
-
-    if (device->reportLength != reportLength) {
-      SendResponse(MessageType::Response_IncorrectLength);
-      return;
-    }
-   
-    memcpy(device->report, report, reportLength);
-    if (HID().SendReport(reportID, device->report, reportLength)  == reportLength + 1) {
-      SendOKResponse();
-    } else {
-      SendResponse(MessageType::Response_HIDWriteFailed);
-    }
+  if (!node->report) {
+    node->id = reportID;
+    node->reportSize = reportSize;
+    node->report = new char[reportSize];
+  } else if (node->reportSize != reportSize) {
+    SendResponse(MessageType::Response_IncorrectLength);
     return;
   }
-  SendResponse(MessageType::Response_UnknownID);
+  
+  memcpy(node->report, report, reportSize);
+  if (HID().SendReport(reportID, report, reportSize) == reportSize + 1) {
+    SendOKResponse();
+  } else {
+    SendResponse(MessageType::Response_HIDWriteFailed);
+  }
 }
 
 void HandleGetSerialNumberMessage() {
@@ -153,8 +127,8 @@ void loop() {
 
   const auto now = millis();
   if ((now - gLastSync) > 100) {
-    for (auto device = rootDevice; device; device = device->next) {
-      HID().SendReport(device->id, device->report, device->reportLength);
+    for (auto node = gRootReport; node; node = node->next) {
+      HID().SendReport(node->id, node->report, node->reportSize);
     }
     gLastSync = now;
   }
@@ -192,8 +166,8 @@ void loop() {
     case MessageType::Hello:
       // Handled above
       [[unreachable]];
-    case MessageType::Plug:
-      HandlePlugMessage(header.getLength(), message);
+    case MessageType::PushDescriptor:
+      HandlePushDescriptorMessage(header.getLength(), message);
       return;
     case MessageType::Report:
       HandleReportMessage(header.getLength(), message);
