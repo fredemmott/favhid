@@ -50,11 +50,15 @@ void SendOKResponse() {
   SendResponse(MessageType::Response_OK);
 }
 
+OpaqueID gVolatileConfigID {};
+
 void HandlePushDescriptorMessage(uint16_t length, char* message) {
   char* copy = new char[length];
   memcpy(copy, message, length);
 
   HID().AppendDescriptor(new HIDSubDescriptor(copy, length));
+  gVolatileConfigID = {};
+
   digitalWrite(LED_BUILTIN, 1);
 
   char buf[7];
@@ -144,8 +148,6 @@ void HandleSetSerialNumberMessage(uint16_t length, const char* message) {
 
   SendOKResponse();
 }
-
-OpaqueID gVolatileConfigID {};
 
 void HandleGetVolatileConfigIDMessage() {
   char buf[sizeof(ShortMessageHeader) + sizeof(OpaqueID)];
