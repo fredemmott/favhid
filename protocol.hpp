@@ -68,7 +68,7 @@ enum class MessageType : uint8_t {
   Response_IncorrectLength,
   Response_HIDWriteFailed,
 
-  Response_UnhandledCommand = 255,
+  Response_UnhandledRequest = 255,
 };
 
 struct ShortMessageHeader {
