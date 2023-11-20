@@ -14,6 +14,9 @@ namespace FAVHID {
 
 #define FAVHID_PROTO_VERSION "2023111702"
 constexpr uint8_t SERIAL_SIZE = 16;
+constexpr uint8_t FIRST_AVAILABLE_REPORT_ID = 3;
+constexpr char USB_STRING_DESCRIPTOR_CHARS[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
+constexpr uint8_t USB_SERIAL_STRING_LENGTH = 20; // including null byte
 
 /** Can be used for serial numbers or config IDs.
  *
@@ -22,6 +25,11 @@ constexpr uint8_t SERIAL_SIZE = 16;
  * Everyone else: I'm sorry :p
  */
 struct OpaqueID {
+  unsigned long Data1 {};
+  unsigned short Data2 {};
+  unsigned short Data3 {};
+  unsigned char Data4[8] {};
+
   inline bool operator==(const OpaqueID& other) const {
     return memcmp(this, &other, sizeof(OpaqueID)) == 0;
   }
@@ -30,17 +38,32 @@ struct OpaqueID {
     return *this == OpaqueID {};
   }
 
+  inline void ToUSBSerialString(char* out, size_t size) const {
+    static_assert(USB_SERIAL_STRING_LENGTH == 20);
+    if (size != USB_SERIAL_STRING_LENGTH) {
+      return;
+    }
+    constexpr char prefix[] = "FAVHID#";
+    constexpr auto fixedBytes = sizeof(prefix) - 1;
+    memcpy(out, prefix, fixedBytes);
+
+    // Save one byte for null
+    const auto serialBytes = 19 - fixedBytes;
+    const auto bytes = reinterpret_cast<const uint8_t*>(this);
+    for (int i = 0; i < serialBytes; ++i) {
+      out[i + fixedBytes] = USB_STRING_DESCRIPTOR_CHARS[bytes[i] % sizeof(USB_STRING_DESCRIPTOR_CHARS)];
+    }
+    out[19] = 0;
+  }
+
 #ifdef FAVHID_CLIENT
   std::string HumanReadable() const;
+  std::string ToUSBSerialString() const;
 
   void Randomize();
   static OpaqueID Random();
 #endif
 
-  unsigned long Data1 {};
-  unsigned short Data2 {};
-  unsigned short Data3 {};
-  unsigned char Data4[8] {};
 };
 static_assert(sizeof(OpaqueID) == SERIAL_SIZE);
 

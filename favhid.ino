@@ -11,13 +11,35 @@ using namespace FAVHID;
 
 #pragma pack(push, 1)
 
+class MyHIDExt : public HID_ {
+  protected:
+    virtual uint8_t getShortName(char* out) override {
+      static_assert(ISERIAL_MAX_LEN == FAVHID::USB_SERIAL_STRING_LENGTH);
+      OpaqueID serial;
+      EEPROM.get(0, serial);
+      serial.ToUSBSerialString(out, ISERIAL_MAX_LEN);
+      return 20;
+    }
+};
+
+HID_& HIDExt() {
+  static HID_* sInstance = nullptr;
+  if (!sInstance) {
+    sInstance = new MyHIDExt();
+  }
+  return *sInstance;
+}
+
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   wdt_disable();
   // Speed is ignored on Arduino Micro, but we need to provide one
   Serial.begin(115200);
+  // Initialize so we have a serial number in the descriptor
+  HIDExt();
   digitalWrite(LED_BUILTIN, 1);
 }
+
 
 struct MessageHeader {
   MessageType type;
@@ -56,7 +78,7 @@ void HandlePushDescriptorMessage(uint16_t length, char* message) {
   char* copy = new char[length];
   memcpy(copy, message, length);
 
-  HID().AppendDescriptor(new HIDSubDescriptor(copy, length));
+  HIDExt().AppendDescriptor(new HIDSubDescriptor(copy, length));
   gVolatileConfigID = {};
 
   digitalWrite(LED_BUILTIN, 1);
@@ -106,7 +128,7 @@ void HandleReportMessage(uint16_t length, char* message) {
   }
   
   memcpy(node->report, report, reportSize);
-  const auto sent = HID().SendReport(reportID, report, reportSize);
+  const auto sent = HIDExt().SendReport(reportID, report, reportSize);
   if (sent == reportSize + 1) {
     SendOKResponse();
     return;
@@ -180,7 +202,7 @@ void loop() {
   const auto now = millis();
   if ((now - gLastSync) > 100) {
     for (auto node = gRootReport; node; node = node->next) {
-      HID().SendReport(node->id, node->report, node->reportSize);
+      HIDExt().SendReport(node->id, node->report, node->reportSize);
     }
     gLastSync = now;
   }
@@ -243,7 +265,7 @@ void loop() {
       HardReset();
       return;
     default:
-      SendResponse(MessageType::Response_UnhandledCommand);
+      SendResponse(MessageType::Response_UnhandledRequest);
       return;
   }
 
