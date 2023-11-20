@@ -11,6 +11,8 @@ using namespace FAVHID;
 
 #pragma pack(push, 1)
 
+void HandleRequest(MessageType, const char*, size_t);
+
 class MyHIDExt : public HID_ {
   protected:
     virtual uint8_t getShortName(char* out) override {
@@ -74,7 +76,7 @@ void SendOKResponse() {
 
 OpaqueID gVolatileConfigID {};
 
-void HandlePushDescriptorMessage(uint16_t length, char* message) {
+void HandlePushDescriptorMessage(const char* message, size_t length) {
   char* copy = new char[length];
   memcpy(copy, message, length);
 
@@ -98,7 +100,7 @@ void ResetUSB() {
   Serial.begin(115200);
 }
 
-void HandleReportMessage(uint16_t length, char* message) {
+void HandleReportMessage(const char* message, size_t length) {
   const uint8_t reportID = static_cast<uint8_t>(message[0]);
   const auto report = &message[1];
   const auto reportSize = length - 1;
@@ -161,7 +163,7 @@ void HandleGetSerialNumberMessage() {
   Serial.write(buf, sizeof(buf)); 
 }
 
-void HandleSetSerialNumberMessage(uint16_t length, const char* message) {
+void HandleSetSerialNumberMessage(const char* message, size_t length) {
   if (length != SERIAL_SIZE) {
     SendResponse(MessageType::Response_IncorrectLength);
     return;
@@ -180,7 +182,7 @@ void HandleGetVolatileConfigIDMessage() {
   Serial.write(buf, sizeof(buf));
 }
 
-void HandleSetVolatileConfigIDMessage(uint16_t length, const char* message) {
+void HandleSetVolatileConfigIDMessage(const char* message, size_t length) {
   if (length != sizeof(gVolatileConfigID)) {
     SendResponse(MessageType::Response_IncorrectLength);
   }
@@ -236,21 +238,25 @@ void loop() {
 
   char message[header.getLength()];
   Serial.readBytes(message, header.getLength());
-  switch (header.type) {
+  HandleRequest(header.type, message, header.getLength());
+}
+
+void HandleRequest(MessageType type, const char* data, size_t size) {
+  switch (type) {
     case MessageType::Hello:
-      // Handled above
+      // Handled by special-case
       [[unreachable]];
     case MessageType::PushDescriptor:
-      HandlePushDescriptorMessage(header.getLength(), message);
+      HandlePushDescriptorMessage(data, size);
       return;
     case MessageType::Report:
-      HandleReportMessage(header.getLength(), message);
+      HandleReportMessage(data, size);
       return;
     case MessageType::GetSerialNumber:
       HandleGetSerialNumberMessage();
       return;
     case MessageType::SetSerialNumber:
-      HandleSetSerialNumberMessage(header.getLength(), message);
+      HandleSetSerialNumberMessage(data, size);
       return;
     case MessageType::ResetUSB:
       ResetUSB();
@@ -259,7 +265,7 @@ void loop() {
       HandleGetVolatileConfigIDMessage();
       return;
     case MessageType::SetVolatileConfigID:
-      HandleSetVolatileConfigIDMessage(header.getLength(), message);
+      HandleSetVolatileConfigIDMessage(data, size);
       return;
     case MessageType::HardReset:
       HardReset();
@@ -268,7 +274,6 @@ void loop() {
       SendResponse(MessageType::Response_UnhandledRequest);
       return;
   }
-
 }
 
 #pragma pack(pop)
