@@ -4,7 +4,16 @@ Fred's Arduino Virtual HID (FAVHID) is a sketch (program) for the Arduino Micro 
 
 This allows it to be used as a more flexible alternative to vJoy.
 
-You probably want to look at the [FAVHID-Client repository](https://github.com/fredemmott/favhid-client) instead.
+## Setting up a device
+
+1. Load this sketch to your Arduino Micro using the Arduino IDE
+2. Download and build the [FAVHID-Client repository](https://github.com/fredemmott/favhid-client) repository
+3. Unplug any other arduinos
+4. Run the `randomize-serialize-number` program from FAVHID-Client
+
+## Creating and using virtual joysticks
+
+Either implement the protocol below, or use FAVHID-Client.
 
 ## Protocol
 
